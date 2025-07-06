@@ -1,18 +1,19 @@
 package com.puskal.filter
 
-import android.graphics.ColorMatrix
+import com.daasuu.mp4compose.filter.*
 
 /**
- * Simple set of video filters with color matrices for preview.
+ * List of sample video filters backed by mp4compose [GlFilter] implementations.
  */
-enum class VideoFilter(val title: String, val colorMatrix: ColorMatrix?) {
-    NONE("None", null),
-    GRAY("Gray", ColorMatrix().apply { setSaturation(0f) }),
-    SEPIA("Sepia", ColorMatrix().apply { setScale(1f, 0.95f, 0.82f, 1f) }),
-    INVERT("Invert", ColorMatrix(floatArrayOf(
-        -1f, 0f, 0f, 0f, 255f,
-        0f, -1f, 0f, 0f, 255f,
-        0f, 0f, -1f, 0f, 255f,
-        0f, 0f, 0f, 1f, 0f
-    )));
+enum class VideoFilter(val title: String, val create: () -> GlFilter) {
+    NONE("None", { GlFilter() }),
+    GRAY("Gray", { GlGrayScaleFilter() }),
+    SEPIA("Sepia", { GlSepiaFilter() }),
+    INVERT("Invert", { GlInvertFilter() }),
+    BILATERAL("Bilateral", { GlBilateralFilter() }),
+    BOX_BLUR("Box Blur", { GlBoxBlurFilter() }),
+    CONTRAST("Contrast", { GlContrastFilter() }),
+    GAUSSIAN_BLUR("Gaussian Blur", { GlGaussianBlurFilter() }),
+    VIGNETTE("Vignette", { GlVignetteFilter() }),
+    PIXELATION("Pixelation", { GlPixelationFilter() });
 }

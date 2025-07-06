@@ -7,7 +7,6 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.Preview
 import androidx.camera.lifecycle.ProcessCameraProvider
-import androidx.camera.view.PreviewView
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
@@ -30,7 +29,6 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
-import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.style.TextAlign
@@ -56,8 +54,7 @@ import dev.chrisbanes.snapper.ExperimentalSnapperApi
 import dev.chrisbanes.snapper.SnapOffsets
 import dev.chrisbanes.snapper.rememberLazyListSnapperLayoutInfo
 import kotlinx.coroutines.launch
-import android.graphics.RenderEffect
-import android.graphics.ColorMatrixColorFilter
+import com.puskal.cameramedia.gl.CameraGlPreviewView
 import com.puskal.filter.VideoFilter
 
 
@@ -246,33 +243,28 @@ fun CameraPreview(
     val preview = remember { Preview.Builder().build() }
     var showFilterSheet by remember { mutableStateOf(false) }
     var selectedFilter by remember { mutableStateOf(VideoFilter.NONE) }
-    val renderEffect = remember(selectedFilter) {
-        selectedFilter.colorMatrix?.let {
-            RenderEffect.createColorFilterEffect(ColorMatrixColorFilter(it))
-        }
+
+    val glPreviewView = remember { CameraGlPreviewView(context) }
+    LaunchedEffect(selectedFilter) {
+        glPreviewView.setGlFilter(selectedFilter.create())
     }
 
-    Box(modifier = Modifier
-        .fillMaxSize()
-        .graphicsLayer {
-            renderEffect?.let { this.renderEffect = it }
-        }) {
+    Box(modifier = Modifier.fillMaxSize()) {
         AndroidView(
             factory = {
-                val cameraPreview = PreviewView(it)
-                cameraProviderFuture.addListener({
-                    preview.also {
-                        it.setSurfaceProvider(cameraPreview.surfaceProvider)
-                    }
-                    try {
-                        cameraProvider.unbindAll()
-                        cameraProvider.bindToLifecycle(lifecycleOwner, defaultCameraFacing, preview)
-                    } catch (e: Exception) {
-                        Log.e("camera", "camera preview exception :${e.message}")
-                    }
-                }, ContextCompat.getMainExecutor(context))
-                cameraPreview
-            }, modifier = Modifier.fillMaxSize()
+                glPreviewView.apply {
+                    cameraProviderFuture.addListener({
+                        preview.setSurfaceProvider(surfaceProvider(ContextCompat.getMainExecutor(context)))
+                        try {
+                            cameraProvider.unbindAll()
+                            cameraProvider.bindToLifecycle(lifecycleOwner, defaultCameraFacing, preview)
+                        } catch (e: Exception) {
+                            Log.e("camera", "camera preview exception :${e.message}")
+                        }
+                    }, ContextCompat.getMainExecutor(context))
+                }
+            },
+            modifier = Modifier.fillMaxSize()
         )
 
         Box(
