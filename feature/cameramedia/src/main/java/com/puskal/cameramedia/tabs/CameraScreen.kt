@@ -1,11 +1,26 @@
 package com.puskal.cameramedia.tabs
 
 import android.util.Log
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.graphics.Canvas
+import android.graphics.ColorMatrixColorFilter
+import androidx.camera.core.ImageCaptureException
+import java.io.File
+import java.io.FileOutputStream
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.camera.core.CameraSelector
 import androidx.camera.core.Preview
+import androidx.camera.core.ImageCapture
+import androidx.camera.video.Recorder
+import androidx.camera.video.VideoCapture
+import androidx.camera.video.QualitySelector
+import androidx.camera.video.Quality
+import androidx.camera.video.VideoRecordEvent
+import androidx.camera.video.FileOutputOptions
+import androidx.camera.video.Recording
 import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
 import androidx.compose.foundation.ExperimentalFoundationApi
@@ -24,8 +39,13 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.ColorFilter
+import androidx.compose.ui.graphics.ColorMatrix
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Paint
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.geometry.toRect
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
@@ -87,7 +107,7 @@ fun CameraScreen(
 
     Column(modifier = Modifier.fillMaxSize()) {
         if (multiplePermissionState.permissions[0].status.isGranted) {
-            CameraPreview(cameraOpenType,
+            CameraPreview(viewModel = viewModel, cameraOpenType = cameraOpenType,
                 onClickCancel = { navController.navigateUp() },
                 onClickOpenFile = {
                     fileLauncher.launch(pickVisualMediaRequest)
@@ -218,7 +238,7 @@ fun CameraMicrophoneAccessPage(
             cameraOpenType = cameraOpenType,
             onClickEffect = { },
             onClickOpenFile = onClickOpenFile,
-            onclickCameraCapture = { },
+            onClickCameraCapture = { _ -> },
             isEnabledLayout = false
         )
     }
@@ -227,18 +247,72 @@ fun CameraMicrophoneAccessPage(
 
 @Composable
 fun CameraPreview(
+    viewModel: CameraMediaViewModel,
     cameraOpenType: Tabs,
     onClickCancel: () -> Unit,
     onClickOpenFile: () -> Unit,
 ) {
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
+    val viewState by viewModel.viewState.collectAsState()
+    var showFilterSheet by remember { mutableStateOf(false) }
     val cameraProviderFuture = remember {
         ProcessCameraProvider.getInstance(context)
     }
     var defaultCameraFacing by remember { mutableStateOf(CameraSelector.DEFAULT_FRONT_CAMERA) }
     val cameraProvider = cameraProviderFuture.get()
     val preview = remember { Preview.Builder().build() }
+    val imageCapture = remember { ImageCapture.Builder().build() }
+    val videoCapture = remember {
+        val recorder = Recorder.Builder().setQualitySelector(QualitySelector.from(Quality.HIGHEST)).build()
+        VideoCapture.withOutput(recorder)
+    }
+    var recording: Recording? by remember { mutableStateOf(null) }
+    val selectedMatrix = remember(viewState.selectedFilterId) {
+        viewModel.filters.firstOrNull { it.id == viewState.selectedFilterId }?.matrix ?: ColorMatrix()
+    }
+
+    fun capturePhoto() {
+        val photoFile = File(context.cacheDir, "photo_${System.currentTimeMillis()}.jpg")
+        val outputOptions = ImageCapture.OutputFileOptions.Builder(photoFile).build()
+        imageCapture.takePicture(
+            outputOptions,
+            ContextCompat.getMainExecutor(context),
+            object : ImageCapture.OnImageSavedCallback {
+                override fun onImageSaved(outputFileResults: ImageCapture.OutputFileResults) {
+                    val bmp = BitmapFactory.decodeFile(photoFile.absolutePath)
+                    val paint = android.graphics.Paint().apply {
+                        colorFilter = android.graphics.ColorMatrixColorFilter(selectedMatrix.values)
+                    }
+                    val result = Bitmap.createBitmap(bmp.width, bmp.height, bmp.config)
+                    Canvas(result).drawBitmap(bmp, 0f, 0f, paint)
+                    FileOutputStream(photoFile).use { result.compress(Bitmap.CompressFormat.JPEG, 100, it) }
+                }
+
+                override fun onError(exception: ImageCaptureException) {
+                    Log.e("camera", "Image capture failed: ${'$'}{exception.message}")
+                }
+            }
+        )
+    }
+
+    fun toggleVideoRecording() {
+        if (recording != null) {
+            recording?.stop()
+            recording = null
+            return
+        }
+        val videoFile = File(context.cacheDir, "video_${System.currentTimeMillis()}.mp4")
+        val options = FileOutputOptions.Builder(videoFile).build()
+        recording = videoCapture.output
+            .prepareRecording(context, options)
+            .start(ContextCompat.getMainExecutor(context)) { event ->
+                if (event is VideoRecordEvent.Finalize) {
+                    // TODO apply filter to recorded video using GPUImage
+                    recording = null
+                }
+            }
+    }
 
     Box(modifier = Modifier.fillMaxSize()) {
         AndroidView(
@@ -250,13 +324,28 @@ fun CameraPreview(
                     }
                     try {
                         cameraProvider.unbindAll()
-                        cameraProvider.bindToLifecycle(lifecycleOwner, defaultCameraFacing, preview)
+                        cameraProvider.bindToLifecycle(
+                            lifecycleOwner,
+                            defaultCameraFacing,
+                            preview,
+                            imageCapture,
+                            videoCapture
+                        )
                     } catch (e: Exception) {
                         Log.e("camera", "camera preview exception :${e.message}")
                     }
                 }, ContextCompat.getMainExecutor(context))
                 cameraPreview
-            }, modifier = Modifier.fillMaxSize()
+            }, modifier = Modifier
+                .fillMaxSize()
+                .drawWithContent {
+                    val paint = Paint().apply {
+                        colorFilter = ColorFilter.colorMatrix(selectedMatrix)
+                    }
+                    drawContext.canvas.saveLayer(size.toRect(), paint)
+                    this@drawWithContent.drawContent()
+                    drawContext.canvas.restore()
+                }
         )
 
         Box(
@@ -271,7 +360,12 @@ fun CameraPreview(
                 cameraOpenType = cameraOpenType,
                 onClickEffect = { },
                 onClickOpenFile = onClickOpenFile,
-                onclickCameraCapture = { },
+                onClickCameraCapture = { option ->
+                    when (option) {
+                        CameraCaptureOptions.PHOTO -> capturePhoto()
+                        else -> toggleVideoRecording()
+                    }
+                },
                 isEnabledLayout = true
             )
 
@@ -287,6 +381,9 @@ fun CameraPreview(
                         defaultCameraFacing =
                             if (defaultCameraFacing == CameraSelector.DEFAULT_FRONT_CAMERA) CameraSelector.DEFAULT_BACK_CAMERA else CameraSelector.DEFAULT_FRONT_CAMERA
                     }
+                    CameraController.FILTER -> {
+                        showFilterSheet = true
+                    }
                     else -> {}
                 }
             }
@@ -294,7 +391,11 @@ fun CameraPreview(
             LaunchedEffect(key1 = defaultCameraFacing) {
                 cameraProvider.unbindAll()
                 cameraProvider.bindToLifecycle(
-                    lifecycleOwner, defaultCameraFacing, preview
+                    lifecycleOwner,
+                    defaultCameraFacing,
+                    preview,
+                    imageCapture,
+                    videoCapture
                 )
             }
 
@@ -326,6 +427,23 @@ fun CameraPreview(
         }
     }
 
+    if (showFilterSheet) {
+        ModalBottomSheet(onDismissRequest = { showFilterSheet = false }) {
+            viewModel.filters.forEach { item ->
+                Text(
+                    text = stringResource(id = item.nameRes),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable {
+                            viewModel.onTriggerEvent(CameraMediaEvent.ChangeFilter(item.id))
+                            showFilterSheet = false
+                        }
+                        .padding(16.dp)
+                )
+            }
+        }
+    }
+
 }
 
 
@@ -336,7 +454,7 @@ fun FooterCameraController(
     cameraOpenType: Tabs,
     onClickEffect: () -> Unit,
     onClickOpenFile: () -> Unit,
-    onclickCameraCapture: () -> Unit,
+    onClickCameraCapture: (CameraCaptureOptions) -> Unit,
     isEnabledLayout: Boolean = false
 ) {
     val coroutineScope = rememberCoroutineScope()
@@ -443,7 +561,11 @@ fun FooterCameraController(
             CaptureButton(
                 modifier = Modifier.alpha(alphaForInteractiveView(isEnabledLayout)),
                 color = captureButtonColor,
-                onClickCapture = onclickCameraCapture
+                onClickCapture = {
+                    val option = captureOptions.getOrNull(layoutInfo.currentItem?.index ?: 0)
+                        ?: CameraCaptureOptions.PHOTO
+                    onClickCameraCapture(option)
+                }
             )
             Column(horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.spacedBy(4.dp),

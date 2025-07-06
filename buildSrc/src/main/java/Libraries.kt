@@ -40,6 +40,7 @@ object Version {
     const val GsonVersion = "2.10.1"
     const val CameraXVersion = "1.3.0-alpha05"
     const val GuavaAndroid="31.0.1-android"
+    const val GPUImage = "2.1.0"
 }
 
 
@@ -101,6 +102,10 @@ object Libraries {
         const val exoplayer = "androidx.media3:media3-exoplayer:$Media3"
         const val expplayerDash = "androidx.media3:media3-exoplayer-dash:$Media3"
         const val media3Ui = "androidx.media3:media3-ui:$Media3"
+    }
+
+    object ImageFilter {
+        const val gpuImage = "jp.co.cyberagent.android:gpuimage:${Version.GPUImage}"
     }
 
     object Test {

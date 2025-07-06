@@ -9,11 +9,13 @@ import com.puskal.theme.R
  * Created by Puskal Khadka on 4/3/2023.
  */
 data class ViewState(
-    val templates: List<TemplateModel>? = null
+    val templates: List<TemplateModel>? = null,
+    val selectedFilterId: Int = 0
 )
 
 sealed class CameraMediaEvent {
     object EventFetchTemplate : CameraMediaEvent()
+    data class ChangeFilter(val filterId: Int) : CameraMediaEvent()
 
 }
 

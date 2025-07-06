@@ -10,4 +10,5 @@ dependencies {
     DATA
     CORE
     cameraXDependencies()
+    implementation(Libraries.ImageFilter.gpuImage)
 }
